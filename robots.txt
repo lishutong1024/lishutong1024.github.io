@@ -1,0 +1,3 @@
+Sitemap: https://lishutong1024.github.io/sitemap.xml
+User-agent:*
+Disallow:
