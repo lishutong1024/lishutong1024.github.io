@@ -8,6 +8,15 @@ export default defineUserConfig({
     description: '李述铜的嵌入式课堂，专注于技术文档分享与知识传播。涵盖嵌入式领域的 FATFS 使用详解等专业内容，还有优秀书籍推荐及丰富的学习资源。深入浅出介绍底层原理和细节，助你提升技术认知，开启硬核学习之旅',
     head: [
       ['meta', { name: 'baidu-site-verification', content: 'codeva-y4YVaKcM8p' }],
+      ['script', {}, `
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?0ec0df4a6adf20a6a93079b1a41f0816";
+  var s = document.getElementsByTagName("script")[0]; 
+  s.parentNode.insertBefore(hm, s);
+})();
+      `],
     ],
 
     plugins: [
