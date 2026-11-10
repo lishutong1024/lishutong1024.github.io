@@ -5,9 +5,12 @@ import { plumeTheme } from 'vuepress-theme-plume'
 export default defineUserConfig({
     lang: 'zh-CN',
     title: '李述铜的嵌入式课堂',
-    description: '李述铜的嵌入式课堂，专注于技术文档分享与知识传播。涵盖嵌入式领域的 FATFS 使用详解等专业内容，还有优秀书籍推荐及丰富的学习资源。深入浅出介绍底层原理和细节，助你提升技术认知，开启硬核学习之旅',
+    description: '李述铜的嵌入式课堂，专注于嵌入式操作系统、RTOS、TCP/IP协议栈等底层技术讲解。从0手写操作系统内核，深入浅出理解计算机底层原理，涵盖任务管理、调度、内存管理、中断、IPC等核心机制，助你提升嵌入式开发能力。',
     head: [
+      ['meta', { name: 'keywords', content: '嵌入式操作系统, RTOS, 手写操作系统, TCP/IP协议栈, 嵌入式开发, 内核原理, 任务调度, 内存管理' }],
       ['meta', { name: 'baidu-site-verification', content: 'codeva-y4YVaKcM8p' }],
+      ['meta', { property: 'og:image', content: '/rtosv2.png' }],
+      ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
       ['script', {}, `
 var _hmt = _hmt || [];
 (function() {

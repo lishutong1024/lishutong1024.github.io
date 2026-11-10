@@ -1,5 +1,8 @@
 ---
 home: true
+title: 嵌入式操作系统与RTOS教程 - 李述铜的嵌入式课堂
+description: 李述铜的嵌入式课堂，专注于嵌入式操作系统、RTOS、TCP/IP协议栈等底层技术讲解。从0手写操作系统内核，深入浅出理解计算机底层原理，涵盖任务管理、调度、内存管理、中断、IPC等核心机制，助你提升嵌入式开发能力。
+keywords: 嵌入式操作系统, RTOS, 手写操作系统, TCP/IP协议栈, 嵌入式开发, 内核原理, 任务调度, 内存管理
 config:
  -  type: hero
     full: true
@@ -14,9 +17,9 @@ config:
         g: { value: 120, offset: 20 }
         b: { value: 255, offset: 40 }
     hero:
-      name: 欢迎来到我的主页
+      name: 李述铜的嵌入式课堂
       tagline: 深研底层，练就硬核内功
-      text: 深入浅出介绍核心原理和细节，助你提升技术认知新高度
+      text: 专注嵌入式操作系统、RTOS、TCP/IP协议栈等底层技术讲解，从0手写内核，助你真正理解计算机工作原理
       actions:
         - 
           theme: brand
@@ -79,6 +82,6 @@ config:
 
 如果对课程有疑问是，欢迎扫下面的微信与我取得联系。
 
-![alt 微信客服](/wx-ask.png)
+![李述铜微信客服二维码](/wx-ask.png)
 
 :::
