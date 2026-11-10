@@ -1,0 +1,84 @@
+<template><div><blockquote>
+<p>为了更好地使用RTOS，我们需要深入理解RTOS工作原理，最好的方法是动手写一个RTOS。</p>
+<p>如果你希望写一个类似RT-Thread/FreeRTOS的系统，欢迎关注这门课程：<a href="https://zw8ls.xetlk.com/s/H2F1Y" target="_blank" rel="noopener noreferrer">【RTOS内核开发】从0手写嵌入式操作系统</a></p>
+</blockquote>
+<p>在很多时候，系统中需要周期性地做某些事情，或者推迟执行某件事，此时可以借助定时器来实现这些功能。</p>
+<h2 id="什么是定时器" tabindex="-1"><a class="header-anchor" href="#什么是定时器"><span>什么是定时器？</span></a></h2>
+<p>RT-Thread中的定时器是一个“<font style="color:#DF2A3F;">非阻塞式</font>”的延迟或周期执行工具，它不依赖任务执行，而是**<font style="color:#DF2A3F;">在系统时钟节拍中断</font><strong><strong>（</strong></strong><font style="color:#DF2A3F;">或者指定的定时器任务）</font>**中被调度触发，执行预设的<font style="color:#DF2A3F;">回调函数</font>。</p>
+<p><img src="/image/docs/notes/tech/rtthread/use/c6/为什么需要定时器/image.png" alt="alt text"></p>
+<p>它与任务中使用延时函数有着不同的特性，具体来说有如下几个方面：</p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>延时函数（<code v-pre>如rt_thread_delay()</code>）</th>
+<th>定时器</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>执行者</td>
+<td>当前任务本身</td>
+<td>系统 tick 定时触发回调</td>
+</tr>
+<tr>
+<td>是否阻塞</td>
+<td>阻塞当前任务</td>
+<td>非阻塞</td>
+</tr>
+<tr>
+<td>使用场景</td>
+<td>任务内部临时等待</td>
+<td>轻量定时触发任务逻辑</td>
+</tr>
+<tr>
+<td>执行位置</td>
+<td>任务上下文</td>
+<td>中断上下文（或任务上下文）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="典型应用场景" tabindex="-1"><a class="header-anchor" href="#典型应用场景"><span>典型应用场景</span></a></h2>
+<p>通常情况下，我们常常将定时器用于以下几种场合。<strong>虽然在这些场合中可以使用硬件定时器实现相同的功能；但是，硬件定时器毕竟有限，于是就需要利用RT-Thread提供的定时器。</strong></p>
+<h3 id="_1-周期性任务调度" tabindex="-1"><a class="header-anchor" href="#_1-周期性任务调度"><span>1. 周期性任务调度</span></a></h3>
+<p>例如：LED 心跳灯、状态刷新。每隔一秒刷新一次界面、闪一次灯，不需要一个完整的任务做这件事。</p>
+<p>如果单独创建一个任务来完成这些简单的工作，则过于浪费任务资源。</p>
+<h3 id="_2-超时检测机制" tabindex="-1"><a class="header-anchor" href="#_2-超时检测机制"><span>2. 超时检测机制</span></a></h3>
+<p>例如：串口接收超时、按键长按。如果在一定时间内没收到数据，说明通信异常，可以重连。</p>
+<h3 id="_3-替代任务延时函数-提高响应效率" tabindex="-1"><a class="header-anchor" href="#_3-替代任务延时函数-提高响应效率"><span>3. 替代任务延时函数，提高响应效率</span></a></h3>
+<p>在任务中，可以避免使用rt_thread_mdelay()等函数，而是在事件发生时被定时器唤醒或回调执行。这样任务就可以尽早做某它事情。</p>
+<h3 id="_4-软件看门狗" tabindex="-1"><a class="header-anchor" href="#_4-软件看门狗"><span>4. 软件看门狗</span></a></h3>
+<p>定时执行一个喂狗操作，防止系统死锁。</p>
+<h3 id="_5-延迟启动某项功能" tabindex="-1"><a class="header-anchor" href="#_5-延迟启动某项功能"><span>5. 延迟启动某项功能</span></a></h3>
+<p>例如，设备开机后延迟5秒启动某个服务。</p>
+<h2 id="案例演示-定时闪烁led-1秒闪一次" tabindex="-1"><a class="header-anchor" href="#案例演示-定时闪烁led-1秒闪一次"><span>案例演示：定时闪烁LED（1秒闪一次）</span></a></h2>
+<p>下面的示例使用一个定时器，每隔 1 秒切换一次 LED 状态。</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">include</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77"> &#x3C;</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">rtthread.h</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">></span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">include</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77"> "</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">base.h</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> </span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">include</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77"> "</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">rtconfig.h</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">// 回调函数</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">static</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> led_timer_cb</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> *</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parameter</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    RT_UNUSED</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">parameter</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    led_toggle</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">LED0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">  // 切换LED 状态</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">int</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> main</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    // 创建一个周期性定时器（1000ms）</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_timer_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> led_timer </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_timer_create</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">led_t</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">                                led_timer_cb</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">                                RT_NULL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">                                rt_tick_from_millisecond</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">500</span><span style="--shiki-light:#999999;--shiki-dark:#666666">),</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">  // RT_TICK_PER_SECOND, </span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">                                RT_TIMER_FLAG_PERIODIC</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">led_timer </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">!=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_NULL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_timer_start</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">led_timer</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">  // 启动定时器</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    return</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>可以看到：如果要使用定时器，我们需要先创建定时器再启动（与任务创建相同）。但是，当定时器启动后，系统会根据定时器的要求周期性（或一次性）的调用定时器指定的回调函数。</p>
+<h3 id="" tabindex="-1"><a class="header-anchor" href="#"><span></span></a></h3>
+</div></template>
+
+

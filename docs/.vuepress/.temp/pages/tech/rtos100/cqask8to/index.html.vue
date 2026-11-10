@@ -1,0 +1,136 @@
+<template><div><p>记得我在刚开始学习嵌入式的时候，常看到网上有资料写：<strong>不要试图在中断中执行太多的工作！</strong></p>
+<p>例如：不要在串口收到数据后，在中断里做复杂的协议解析。因为协议解析通常涉及帧头判断、校验和计算、命令分发等多个步骤，如果每收到一个字节就在中断里做这些操作，ISR的执行时间会被大幅拉长，进而影响其他中断的及时响应。</p>
+<p>为了简化中断处理程序的工作，在裸机程序中，我们通常的做法是：<strong>在中断中读取数据并设置一个标志位，然后让主循环不断轮询这个标志位。一旦发现标志位被置位，就清除标志位并执行相应的处理逻辑</strong>。下面给出一个简单的代码示例：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 全局标志位，必须用volatile修饰 */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">volatile</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> uart_rx_flag </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 串口接收中断 */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> UART_IRQHandler</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665">UART_GetITStatus</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">UART1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> UART_IT_RXNE</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> !=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RESET</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* 快速读取一个字节到缓冲区 */</span></span>
+<span class="line"><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">        rx_buffer</span><span style="--shiki-light:#999999;--shiki-dark:#666666">[</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">rx_head</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">++</span><span style="--shiki-light:#999999;--shiki-dark:#666666">]</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> =</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> UART_ReceiveData</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">UART1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">        rx_head </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">%=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> BUFFER_SIZE</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* 设置标志位，通知主循环有数据 */</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">        uart_rx_flag </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        UART_ClearITPendingBit</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">UART1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> UART_IT_RXNE</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 主函数 */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">int</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> main</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* 硬件初始化... */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    while</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">        if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">uart_rx_flag</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">            uart_rx_flag </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">          </span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">            parse_protocol</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">           </span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">            process_command</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">         </span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">        }</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* 其他主循环任务... */</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>那么，为什么在中断处理程序中不能做太多事情？当引入了RTOS之后，又该如何简化中断处理程序的工作？</p>
+<p>今天我们就来聊聊其中的原因，以及在引入RTOS之后，正确的做法是什么。</p>
+<h2 id="isr的特殊之处" tabindex="-1"><a class="header-anchor" href="#isr的特殊之处"><span>ISR的特殊之处</span></a></h2>
+<p>要理解为什么在ISR中不能做太多事情，首先要搞清楚ISR的运行环境，以及它和普通任务究竟有什么不同。</p>
+<p>众所周知，ISR运行在<strong>中断上下文中，这是一种非常特殊的执行环境</strong>。与main()函数的运行环境相比，它的主要特点如下：</p>
+<h3 id="优先级高" tabindex="-1"><a class="header-anchor" href="#优先级高"><span>优先级高</span></a></h3>
+<p>只要中断触发，CPU就会立即打断当前正在执行的任何任务，转而去执行ISR。如果ISR执行时间太长，所有任务都得等待，无法及时执行。</p>
+<h3 id="不能阻塞或挂起" tabindex="-1"><a class="header-anchor" href="#不能阻塞或挂起"><span>不能阻塞或挂起</span></a></h3>
+<p>在ISR中，不能调用任何可能引起阻塞和挂起的API。比如不能调用RT-Thread的rt_thread_mdelay()（延时函数），也不能调用printf()（可能阻塞在串口发送上）。</p>
+<p>有的同学可能没注意到这点，结果导致整个系统卡死。这是因为，绝大多数RTOS并不支持唤醒阻塞或挂起的ISR。</p>
+<h2 id="在isr中做太多事情的问题" tabindex="-1"><a class="header-anchor" href="#在isr中做太多事情的问题"><span>在ISR中做太多事情的问题</span></a></h2>
+<p>在已经了解了ISR的特点之后，让我们来结合几个实际场景，了解在ISR中做太多事情可能带来的问题。</p>
+<h3 id="场景一-串口接收中断里解析协议" tabindex="-1"><a class="header-anchor" href="#场景一-串口接收中断里解析协议"><span>场景一：串口接收中断里解析协议</span></a></h3>
+<p>有些同学在串口接收中断中，每收到一个字节，便立即进行协议解析，比如判断帧头、计算校验、处理命令。</p>
+<p>当协议比较复杂时，该解析过程可能需要几十微秒甚至更长时间。</p>
+<p>在这段时间里，如果有其他更重要的中断（比如电机控制的编码器中断）触发，并且中断优先级不高于串口中断。那么，其他中断就会被延迟响应。在工业控制中，这种延迟可能导致严重后果。</p>
+<h3 id="场景二-外部中断里直接操作传感器" tabindex="-1"><a class="header-anchor" href="#场景二-外部中断里直接操作传感器"><span>场景二：外部中断里直接操作传感器</span></a></h3>
+<p>有些同学在ISR中直接通过I2C读取传感器数据，然后进行数据处理。</p>
+<p>由于I2C通信速率本身就比较慢，使得读取一个传感器可能需要几毫秒。这样的耗时，也有可能影响其他中断和主循环的执行。</p>
+<h2 id="正确做法-上半部-下半部" tabindex="-1"><a class="header-anchor" href="#正确做法-上半部-下半部"><span>正确做法：上半部+下半部</span></a></h2>
+<p>由此可见，我们不能在ISR中做太多复杂、耗时的事情，而是应该：<strong>减少ISR的整体执行时间，让其他优先级更高、更紧急的事件能够得到处理。</strong></p>
+<p>既然如此，我们应该如何设计自己的程序呢？</p>
+<blockquote>
+<p>答案是：<strong>把中断处理分成两部分：上半部分和下半部分。</strong></p>
+</blockquote>
+<h3 id="上半部分" tabindex="-1"><a class="header-anchor" href="#上半部分"><span>上半部分</span></a></h3>
+<p><strong>ISR本身，用于实现必须立即完成、且不能被延迟的快速操作</strong>，比如：</p>
+<ul>
+<li>清除中断标志位，防止中断重复触发</li>
+<li>从硬件寄存器中读取少量关键数据</li>
+<li>释放信号量，或者向消息队列发送消息，通知任务有事件发生</li>
+</ul>
+<p><strong>上半部的执行时间应该尽可能短，通常控制在几微秒、几十微秒以内，甚至更短</strong>。</p>
+<h3 id="下半部分" tabindex="-1"><a class="header-anchor" href="#下半部分"><span>下半部分</span></a></h3>
+<p><strong>具体表现为一个普通的任务，负责处理耗时的逻辑</strong>，比如：</p>
+<ul>
+<li>协议解析和数据处理</li>
+<li>复杂的算法计算</li>
+<li>传感器数据的读取和滤波</li>
+<li>业务逻辑和状态机</li>
+</ul>
+<h3 id="相互协作" tabindex="-1"><a class="header-anchor" href="#相互协作"><span>相互协作</span></a></h3>
+<p>在实际应用中，<strong>任务通过等待信号量或消息队列来阻塞自己。当ISR释放信号量或发送消息时，任务被唤醒，在任务上下文中执行耗时的处理逻辑</strong>。</p>
+<p>这种协作关系可以用下面的图示来表示：
+<img src="@source/notes/tech/rtos100/ipc/images/q79/上半部下半部协作流程图.jpg" alt="上半部下半部协作流程图"></p>
+<p>如上图所示，ISR只做清除中断标志、读取数据、释放信号量等快速操作；而任务通过等待信号量或消息队列阻塞自己。当ISR释放信号量或发送消息后，任务被唤醒并执行耗时的协议解析和数据处理。</p>
+<p>这种设计的好处是显而易见的：<strong>ISR快速执行完后退出，以保证系统的中断响应速度；复杂逻辑在任务中执行，任务可以使用阻塞型API，可以被更高优先级的任务抢占，也可以执行耗时的操作</strong>。如此一来，系统的实时性和稳定性都得到了保障。</p>
+<h2 id="四、rt-thread中的实现方式" tabindex="-1"><a class="header-anchor" href="#四、rt-thread中的实现方式"><span>四、RT-Thread中的实现方式</span></a></h2>
+<p>下面给出了RT-Thread中，使用信号量实现ISR与任务相互配合的例子：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 定义信号量 */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">static</span><span style="--shiki-light:#998418;--shiki-dark:#B8A965"> rt_sem_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> uart_rx_sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 串口接收中断（上半部） */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> UART_IRQHandler</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665">UART_GetITStatus</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">UART1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> UART_IT_RXNE</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> !=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RESET</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* 快速读取数据到环形缓冲区 */</span></span>
+<span class="line"><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">        rx_buffer</span><span style="--shiki-light:#999999;--shiki-dark:#666666">[</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">rx_head</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">++</span><span style="--shiki-light:#999999;--shiki-dark:#666666">]</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> =</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> UART_ReceiveData</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">UART1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">        rx_head </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">%=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> BUFFER_SIZE</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* 释放信号量，通知任务有数据 */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_sem_release</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">uart_rx_sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* 清除中断标志 */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        UART_ClearITPendingBit</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">UART1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> UART_IT_RXNE</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 数据处理任务（下半部） */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> uart_process_task</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> *</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parameter</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    while</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* 等待信号量，阻塞自己 */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_sem_take</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">uart_rx_sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_WAITING_FOREVER</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* 在任务上下文中进行协议解析 */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        parse_protocol</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        process_command</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>在这个示例中，串口接收中断作为上半部，每收到一个字节就将其存入环形缓冲区并释放信号量，然后立即退出；数据处理任务作为下半部，通过rt_sem_take()阻塞等待信号量。一旦被中断释放的信号量唤醒，任务就从环形缓冲区中读取数据，并进行协议解析和命令处理。</p>
+<p>如此一来，ISR的执行时间被压缩到最短，而耗时的协议解析工作在任务上下文中完成。</p>
+<h2 id="总结" tabindex="-1"><a class="header-anchor" href="#总结"><span>总结</span></a></h2>
+<p>综上所述，ISR中不能做太多复杂、耗时的事情，主要原因在于中断环境的特殊性：优先级最高、不能阻塞和挂起。</p>
+<p>为了提高系统的可靠性和实时响应性，正确的做法是采用&quot;上半部+下半部&quot;的设计模式：</p>
+<ul>
+<li><strong>上半部分：ISR中只做快速的硬件操作和事件通知，</strong></li>
+<li><strong>下半部分：耗时的处理逻辑交给任务，在任务上下文中执行。</strong></li>
+</ul>
+<p>掌握这种设计模式，是写出稳定、高效、实时的RTOS应用的关键。</p>
+<hr>
+<blockquote>
+<p>如果你希望系统地学习RTOS底层原理，可以了解我的《RTOS开发与实战》课程。</p>
+<p>课程不是简单地讲解FreeRTOS API的使用，而是带你从零开始编写一个RTOS内核，逐步实现任务管理、任务调度、上下文切换、同步与通信等核心机制，并通过一个远程温湿度监控设备项目，将操作系统原理应用到实际嵌入式开发中。</p>
+<p>适合希望深入理解RTOS工作原理、提升嵌入式底层开发能力的同学。</p>
+<p><VPLink href="/blog/diyrtos/">课程详情</VPLink></p>
+</blockquote>
+</div></template>
+
+

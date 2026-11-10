@@ -1,0 +1,158 @@
+<template><div><p>昨天碰到有位同学求助程序运行异常的问题，分析和调试了他的代码之后才发现，问题原因为：<strong>在写中断服务程序的时候，调用的某个函数内部有等待信号量的操作</strong>。结果一运行，系统就莫名其妙地卡死了。他的代码大体类似于：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 错误示例：在中断中调用阻塞函数 */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> UART_IRQHandler</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* 等待信号量 —— 这会导致系统卡死！ */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    rt_sem_take</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_WAITING_FOREVER</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* 处理数据 */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    process_data</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>显然，之所以系统卡死，是因为：<strong>中断处理程序中调用任务阻塞或挂起等接口。</strong></p>
+<p>众所周知，中断不能阻塞或挂起，这是RTOS编程中一条非常重要的规则。</p>
+<p>不过，很多人只是知其然不知其所以然。</p>
+<p>在这篇文章中，我将结合RT-Thread源码，来分析为什么不能阻塞或挂起，以及如果违反了该规则到底会发生什么。</p>
+<h2 id="什么是任务阻塞和挂起接口" tabindex="-1"><a class="header-anchor" href="#什么是任务阻塞和挂起接口"><span>什么是任务阻塞和挂起接口</span></a></h2>
+<p>在进行具体的说明之前，让我们先明确一下什么是&quot;任务阻塞和挂起接口&quot;。</p>
+<p><strong>所谓阻塞或挂起接口，指的是那些调用后，可能导致当前任务进入阻塞或挂起状态的函数，也就是会使得任务暂停运行。</strong></p>
+<p>以RT-Thread为例，常见的接口包括：</p>
+<ol>
+<li><strong>延时函数</strong>：比如rt_thread_mdelay()。调用后任务会进入阻塞状态，等待指定时间后被唤醒。</li>
+<li><strong>接收消息队列</strong>：比如rt_mq_recv()。如果队列中没有消息，任务会阻塞等待，直到有消息发送到队列。</li>
+<li><strong>等待事件标志组</strong>：比如rt_event_recv()。如果期望的事件没有发生，任务会阻塞等待。</li>
+<li><strong>获取互斥量</strong>：比如rt_mutex_take()。如果互斥量已被其他任务持有，任务会阻塞等待。</li>
+</ol>
+<p>这些接口有一个共同特点：<strong>任务可能不会立即从接口中返回，而是会停下来等待直至某个条件满足后，再从接口中返回。</strong></p>
+<h2 id="当任务暂停运行时-rtos内部到底发生了什么" tabindex="-1"><a class="header-anchor" href="#当任务暂停运行时-rtos内部到底发生了什么"><span>当任务暂停运行时，RTOS内部到底发生了什么</span></a></h2>
+<p>要理解为什么中断不能调用这些函数，我们需要先搞清楚一个问题：<strong>当一个任务调用阻塞函数时，RTOS的底层到底做了什么</strong>？</p>
+<p>以任务调用rt_sem_take()等待信号量为例，该过程的源码如下所示：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">rt_err_t</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_sem_take</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#998418;--shiki-dark:#B8A965">rt_sem_t</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#998418;--shiki-dark:#B8A965"> rt_int32_t</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> timeout</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_base_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> level</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    struct</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> rt_thread </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">*</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* parameter check */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    RT_ASSERT</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">sem </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">!=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_NULL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    RT_ASSERT</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665">rt_object_get_type</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">&#x26;</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#999999;--shiki-dark:#666666">.</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> ==</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_Object_Class_Semaphore</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    RT_OBJECT_HOOK_CALL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">rt_object_trytake_hook</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">&#x26;</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#999999;--shiki-dark:#666666">.</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)));</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* disable interrupt */</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">    level </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_hw_interrupt_disable</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    RT_DEBUG_LOG</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">RT_DEBUG_IPC</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">thread </span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">%s</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D"> take sem:</span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">%s</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">, which value is: </span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">%d\n</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">                                rt_thread_self</span><span style="--shiki-light:#999999;--shiki-dark:#666666">()-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">name</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">                                ((</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">struct</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> rt_object </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">*</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">name</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">                                sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">value</span><span style="--shiki-light:#999999;--shiki-dark:#666666">));</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">value</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> ></span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    {</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* semaphore is available */</span></span>
+<span class="line"><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">        sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">value</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> --</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* enable interrupt */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_hw_interrupt_enable</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">level</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    else</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    {</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        /* no waiting, return with timeout */</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">        if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">timeout </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">==</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">        {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">            rt_hw_interrupt_enable</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">level</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">            return</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> -</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">RT_ETIMEOUT</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">        }</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">        else</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">        {</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">            /* current context checking */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">            RT_DEBUG_SCHEDULER_AVAILABLE</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">RT_TRUE</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">            /* semaphore is unavailable, push to suspend list */</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">            /* get current thread */</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">            thread </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_thread_self</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">            /* reset thread error number */</span></span>
+<span class="line"><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">            thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">error</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> =</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_EOK</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">            RT_DEBUG_LOG</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">RT_DEBUG_IPC</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">sem take: suspend thread - </span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">%s\n</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">                                        thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">name</span><span style="--shiki-light:#999999;--shiki-dark:#666666">));</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">            /* suspend thread */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">            _ipc_list_suspend</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">&#x26;</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#999999;--shiki-dark:#666666">.</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">suspend_thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">),</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">                                thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">                                sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#999999;--shiki-dark:#666666">.</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">.</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">flag</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">            /* has waiting time, start thread timer */</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">            if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">timeout </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">></span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">            {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">                RT_DEBUG_LOG</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">RT_DEBUG_IPC</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">set thread:</span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">%s</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D"> to timer list</span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">\n</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">                                            thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">name</span><span style="--shiki-light:#999999;--shiki-dark:#666666">));</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                /* reset the timeout of thread timer and start it */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">                rt_timer_control</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">&#x26;</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">thread_timer</span><span style="--shiki-light:#999999;--shiki-dark:#666666">),</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">                                 RT_TIMER_CTRL_SET_TIME</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">                                 &#x26;</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">timeout</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">                rt_timer_start</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">&#x26;</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">thread_timer</span><span style="--shiki-light:#999999;--shiki-dark:#666666">));</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">            }</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">            /* enable interrupt */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">            rt_hw_interrupt_enable</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">level</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">            /* do schedule */</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">            rt_schedule</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">            if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">error</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> !=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_EOK</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">            {</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">                return</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> thread</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">error</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">            }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">        }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    RT_OBJECT_HOOK_CALL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">rt_object_take_hook</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">&#x26;</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">-></span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#999999;--shiki-dark:#666666">.</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parent</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)));</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    return</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_EOK</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>RTOS的执行过程大致如下：</p>
+<ol>
+<li>检查信号量当前是否可用（value &gt; 0），如果可用则将value减1并立即返回；</li>
+<li>如果不可用，将当前任务的TCB（任务控制块）从就绪队列中移除；</li>
+<li>将当前任务的TCB加入到该信号量的等待队列中（按优先级排序）；</li>
+<li>将任务状态标记为&quot;挂起&quot;（RT_THREAD_SUSPEND）；</li>
+<li>触发调度器rt_schedule()，选择下一个最高优先级的就绪任务运行；</li>
+<li>当其他任务或中断调用rt_sem_release()释放信号量时，内核将等待队列中最高优先级的任务TCB移回就绪队列；</li>
+<li>调度器在适当时机将该任务唤醒，继续执行。</li>
+</ol>
+<p>为便于理解，整个过程可以用下面的图示来表示：
+<img src="@source/notes/tech/rtos100/irq/images/q80/任务阻塞唤醒内部流程示意图.jpg" alt="任务阻塞唤醒内部流程示意图"></p>
+<p>对于RT-Thread的其他阻塞接口，其工作原理和执行流程也是类似的。</p>
+<p>既然我们已经清楚了任务阻塞时RTOS内部的操作过程，那么把同样的函数放到中断中调用，为什么就会出问题呢？</p>
+<p>根本原因在于，任务阻塞的整个过程都建立在一个前提之上——<strong>当前执行的是一个被调度器管理的任务。而中断恰恰不满足这个前提</strong>。</p>
+<p>具体来说，有以下两个原因：</p>
+<h2 id="原因一-中断没有tcb-调度器无法管理" tabindex="-1"><a class="header-anchor" href="#原因一-中断没有tcb-调度器无法管理"><span>原因一：中断没有TCB，调度器无法管理</span></a></h2>
+<p>rt_sem_take()成功执行的第一步，便是将&quot;当前任务&quot;的TCB从就绪队列中移除。</p>
+<p>但问题是：<strong>中断上下文中根本没有&quot;当前任务&quot;这个概念，中断和任务本身不是同一个东西</strong>。</p>
+<blockquote>
+<p>中断运行在中断上下文中，它没有对应的任务控制块（TCB），不是一个任务。当CPU在执行ISR时，调度器并不知道&quot;当前正在运行的是谁&quot;，调度器只能识别任务。</p>
+<p>如果在中断中调用rt_sem_take()，RTOS将试图获取&quot;当前任务&quot;的TCB指针（通过rt_thread_self()）。但是，这个指针指向的是被中断打断的那个任务的TCB，而不是中断本身。</p>
+<p>于是RTOS<strong>会错误地把被中断的那个任务从就绪队列中移除、加入等待队列、标记为挂起</strong>。</p>
+<p>但实际上，被中断的任务根本没有调用这个函数，它只是被中断打断了而已。</p>
+</blockquote>
+<p>由此可见，该任务莫名其妙地被挂起了，但它自己并不知道。等中断退出后，调度器才发现这个任务已经不在就绪队列中了，就不会再调度它，导致这个任务&quot;永远沉睡&quot;。</p>
+<p>现实中，很多RTOS内部并没有相应的处理逻辑来应对这种异常情况，将会导致系统死机或异常。</p>
+<h2 id="原因二-违背了中断快速响应的设计原则" tabindex="-1"><a class="header-anchor" href="#原因二-违背了中断快速响应的设计原则"><span>原因二：违背了中断快速响应的设计原则</span></a></h2>
+<p>此外，还有一个设计原则层面的原因：<strong>中断的设计目标就是快速响应、快速退出，让中断阻塞或挂起违背了这个原则。</strong></p>
+<p>中断是用来处理紧急硬件事件的，它的执行时间应该尽可能短，通常控制在几微秒到几十微秒以内。如果在中断中调用阻塞函数，中断的执行时间就变得不可预测。</p>
+<p>同时，根据CPU的工作机制，在中断阻塞等待的这段时间里，同优先级或低优先级的中断都无法得到响应，这将影响系统的实时性和可靠性。</p>
+<h2 id="总结" tabindex="-1"><a class="header-anchor" href="#总结"><span>总结</span></a></h2>
+<p>综上所述，中断处理程序不能调用任务阻塞等接口，主要原因为：</p>
+<ol>
+<li><strong>中断没有TCB，调度器无法管理</strong>：任务阻塞的底层实现依赖于TCB的操作，而中断上下文中没有对应的TCB，调用阻塞函数会破坏系统内部状态。</li>
+<li><strong>违背了中断快速响应的设计原则</strong>：中断的执行时间应该短且确定，阻塞会让中断执行时间不可预测，破坏系统实时性。</li>
+</ol>
+<p>因此，中断中只做非阻塞的快速操作（如清除中断标志、读取数据等），把阻塞等待和耗时处理交给任务。如果必须处理复杂的任务时，可以通过一定的方式将其转交给任务处理，转交方法可参考我的另一篇文章《怎样将ISR中的复杂事情交给任务完成》。</p>
+<hr>
+<blockquote>
+<p>如果你希望系统地学习RTOS底层原理，可以了解我的《RTOS开发与实战》课程。</p>
+<p>课程不是简单地讲解FreeRTOS API的使用，而是带你从零开始编写一个RTOS内核，逐步实现任务管理、任务调度、上下文切换、同步与通信等核心机制，并通过一个远程温湿度监控设备项目，将操作系统原理应用到实际嵌入式开发中。</p>
+<p>适合希望深入理解RTOS工作原理、提升嵌入式底层开发能力的同学。</p>
+<p><VPLink href="/blog/diyrtos/">课程详情</VPLink></p>
+</blockquote>
+</div></template>
+
+

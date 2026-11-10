@@ -1,0 +1,111 @@
+<template><div><blockquote>
+<p>为了更好地使用RTOS，我们需要深入理解RTOS工作原理，最好的方法是动手写一个RTOS。</p>
+<p>如果你希望写一个类似RT-Thread/FreeRTOS的系统，欢迎关注这门课程：<a href="https://zw8ls.xetlk.com/s/H2F1Y" target="_blank" rel="noopener noreferrer">【RTOS内核开发】从0手写嵌入式操作系统</a></p>
+</blockquote>
+<p>本课时介绍如何让任务睡眠，从而让任务暂停运行指定的时间。</p>
+<h2 id="为什么要延时" tabindex="-1"><a class="header-anchor" href="#为什么要延时"><span>为什么要延时</span></a></h2>
+<p>在实际项目中，我们经常会用到让任务睡眠相关的接口，从而实现以下功能。</p>
+<ul>
+<li>避免CPU占用过多（如忙等）</li>
+<li>控制执行节奏（如LED闪烁、采样周期）</li>
+<li>给其他任务运行机会</li>
+</ul>
+<h2 id="工作原理" tabindex="-1"><a class="header-anchor" href="#工作原理"><span>工作原理</span></a></h2>
+<p>当任务需要睡眠时，RT-Thread会将其加入到定时器列表里。这样一来，任务就不会参与调度，无法运行。</p>
+<p>只有当任务睡眠时间结束时，任务才会从定时器列表移回就绪队列。</p>
+<p><img src="/image/docs/notes/tech/rtthread/use/c5/延时接口/image.png" alt="alt text"></p>
+<h2 id="相关接口" tabindex="-1"><a class="header-anchor" href="#相关接口"><span>相关接口</span></a></h2>
+<p>在RT-Thread中，与睡眠相关的接口如表所示：</p>
+<table>
+<thead>
+<tr>
+<th>函数名</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>rt_thread_mdelay(ms)</td>
+<td>毫秒级延时（常用）</td>
+</tr>
+<tr>
+<td>rt_thread_delay(tick)</td>
+<td>等同于rt_thread_sleep()</td>
+</tr>
+<tr>
+<td>rt_thread_sleep(tick)</td>
+<td>tick数延时，单位为系统节拍数</td>
+</tr>
+<tr>
+<td>rt_thread_delay_until(&amp;tick, inc_ticks)</td>
+<td>从*tick开始的时间，睡眠inc_ticks时间</td>
+</tr>
+</tbody>
+</table>
+<p>其中，rt_thread_mdelay()以毫秒为单位，其余函数以系统时钟节拍周期为单位。该周期由如下配置宏来决定：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">define</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> RT_TICK_PER_SECOND</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">  1000</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div></div></div><h2 id="示例代码-每秒闪烁-led" tabindex="-1"><a class="header-anchor" href="#示例代码-每秒闪烁-led"><span>示例代码：每秒闪烁 LED</span></a></h2>
+<p>下面给出了一个简单的示例，展示了部分睡眠函数的作用。</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">include</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77"> &#x3C;</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">rtthread.h</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">></span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">include</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77"> "</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">base.h</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> task1_entry</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> *</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">param</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    RT_UNUSED</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">param</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    while</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_kprintf</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">Task 1 is running</span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">\n</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_thread_delay</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">RT_TICK_PER_SECOND</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">        // 延时1秒</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> task2_entry</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> *</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">param</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    RT_UNUSED</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">param</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_tick_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> ticks </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_tick_get</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    while</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_kprintf</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">Task 2 is running</span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">\n</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_thread_delay_until</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">&#x26;</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">ticks</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_TICK_PER_SECOND</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">int</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> main</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    hardware_init</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_thread_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> t1 </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_thread_create</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span></span>
+<span class="line"><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">        "</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">t1</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">        task1_entry</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">        RT_NULL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">        1024</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">        20</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">     // 相同优先级</span></span>
+<span class="line"><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">        20</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">       // 时间片为5个tick</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    );</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_thread_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> t2 </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_thread_create</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span></span>
+<span class="line"><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">        "</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">t2</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">        task2_entry</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">        RT_NULL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">        1024</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">        20</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">     // 相同优先级</span></span>
+<span class="line"><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">        40</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    );</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">t1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_thread_startup</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">t1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">t2</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_thread_startup</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">t2</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    return</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><h2 id="注意事项" tabindex="-1"><a class="header-anchor" href="#注意事项"><span>注意事项</span></a></h2>
+<h3 id="睡眠的时间精度取决于系统时钟节拍周期" tabindex="-1"><a class="header-anchor" href="#睡眠的时间精度取决于系统时钟节拍周期"><span>睡眠的时间精度取决于系统时钟节拍周期</span></a></h3>
+<p>RT-Thread 使用<strong>系统时钟节拍定时器</strong>来周期性触发任务调度。该时钟节拍由RT_TICK_PER_SECOND宏配置。</p>
+<p>假设RT_TICK_PER_SECOND=1000，那么一个tick时间= 1ms。也就说，此时睡眠的最小单位就是 1 Tick。</p>
+<p>如果调用睡眠时间的函数时间点卡得不够好，则可能睡眠过多或过多少，具体如下图所示。</p>
+<p><img src="/image/docs/notes/tech/rtthread/use/c5/延时接口/image-1.png" alt="alt text">
+<strong>从上图可以看出，实际的睡眠时间比期望的要短或长一些，但是差距不超过一个tick（假设任务在睡眠完之后，能够立即运行）</strong></p>
+<p><strong>而如果有其它任何干扰，如更高优先级的任务抢占CPU、同优先级其它任务正在运行，则实际延时时间要更长一些。</strong></p>
+<div class="hint-container info">
+<p class="hint-container-title">相关信息</p>
+<p>因此，在 RTOS 中我们说延时是“近似的、最小保证的延时”，不能用于精密定时（如 1ms 级别的 PWM 控制），而应使用硬件定时器或定时器中断实现更高精度的控制。</p>
+</div>
+</div></template>
+
+

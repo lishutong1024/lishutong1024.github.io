@@ -1,0 +1,149 @@
+<template><div><p>对于某些喜欢刨根究底的同学来说，他们可能会注意到RT-Thread提供了rt_schedule()调度函数。</p>
+<p>当这个函数被调用的时候，RT-Thread会进行任务调度。当需要任务切换时，会进一步调用rt_hw_context_switch()进行任务上下文切换，从而切换到其他任务运行。</p>
+<p>你可能会产生这样的疑问：</p>
+<blockquote>
+<p>什么是任务上下文切换？
+rt_hw_context_switch()看起来不就是一个普通的C函数吗？为什么能进行上下文切换？
+相比函数调用，上下文切换到底有什么区别之处？</p>
+</blockquote>
+<p>在这篇文章，我将结合就上述问题进行一一介绍。</p>
+<h2 id="普通函数调用在做什么" tabindex="-1"><a class="header-anchor" href="#普通函数调用在做什么"><span>普通函数调用在做什么</span></a></h2>
+<p>首先，让我们先看一下普通的函数调用到底在做什么。</p>
+<p>下面给出了一段简单的C代码：一个任务函数调用add()函数，计算3加5的结果。</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">int</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> add</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">int</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> a</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> int</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> b</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    int</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> sum</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">    sum </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> a </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">+</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> b</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    return</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> sum</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> task_entry</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> *</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parameter</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    int</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> result</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">    result </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> add</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">3</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 5</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    for</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (;;)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {}</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>当CPU执行到result = add(3, 5);这一行的时候，它会做哪些事情呢？</p>
+<h3 id="准备工作" tabindex="-1"><a class="header-anchor" href="#准备工作"><span>准备工作</span></a></h3>
+<p>在调用add()函数之前，CPU会做一些准备工作：</p>
+<ol>
+<li><strong>传递参数</strong>：按照ARM的调用约定，第一个参数3放到R0寄存器，第二个参数5放到R1寄存器。</li>
+<li><strong>保存返回地址</strong>：把当前指令的下一条指令地址（也就是add()的返回地址）保存到LR链接寄存器。</li>
+<li><strong>跳转到函数</strong>：跳转到add()函数的入口地址开始执行。</li>
+</ol>
+<h3 id="执行函数" tabindex="-1"><a class="header-anchor" href="#执行函数"><span>执行函数</span></a></h3>
+<p>进入add()函数之后，CPU会继续做：</p>
+<ol>
+<li><strong>分配栈空间</strong>：把SP（栈指针）往下移动，为局部变量sum分配空间。</li>
+<li><strong>执行函数体</strong>：把R0和R1的值相加，结果存到局部变量sum里。</li>
+<li><strong>设置返回值</strong>：把sum的值放到R0寄存器，作为函数返回值。</li>
+</ol>
+<h3 id="函数返回时" tabindex="-1"><a class="header-anchor" href="#函数返回时"><span>函数返回时</span></a></h3>
+<p>函数执行完，要返回的时候，CPU会做：</p>
+<ol>
+<li><strong>恢复栈空间</strong>：把SP往上移动4字节，释放局部变量sum占用的栈空间。</li>
+<li><strong>跳回调用处</strong>：根据LR寄存器中保存的返回地址，跳回task_entry()函数继续执行。</li>
+<li><strong>使用返回值</strong>：task_entry()函数从R0寄存器中取出返回值，存到result变量里。</li>
+</ol>
+<p>在上述整个过程中，<strong>函数调用始终使用的是同一个栈</strong>。不管是task_entry()函数还是add()函数，它们的局部变量、返回地址都压在同一个栈里。</p>
+<p>此外，<strong>函数调用不会改变当前运行的任务，任务只是暂时去执行add()函数的代码而已</strong>。</p>
+<h2 id="上下文切换在做什么" tabindex="-1"><a class="header-anchor" href="#上下文切换在做什么"><span>上下文切换在做什么</span></a></h2>
+<p>上下文切换看起来似乎和函数调用相同，都是跳转到别的地方运行一段时间，最后再跳转回来继续执行原任务。</p>
+<p>不过，二者也有区别：<strong>上下文切换是跳转到另一个任务（而非函数）中去执行，且下次切换回来的时间是不确定的。</strong> 不过，我们似乎也可以将上下文切换看作是一种”<strong>特殊的函数调用</strong>“。</p>
+<p>具体来说，上下文切换主要做三件事情：</p>
+<ol>
+<li><strong>保存当前任务的上下文</strong>：把当前任务的所有CPU寄存器（R0-R11、PC、LR、SP、PSR等）保存到当前任务自己的栈里。</li>
+<li><strong>恢复下一个任务的上下文</strong>：从下一个任务的栈里，把它之前保存的寄存器值恢复到CPU的寄存器中。</li>
+<li><strong>跳转到下一个任务运行</strong>：更新栈指针，跳转到下一个任务的代码开始执行。</li>
+</ol>
+<p><img src="@source/notes/tech/rtos100/schedule/images/q46/上下文切换过程横向流程图.jpg" alt="上下文切换过程横向流程图"></p>
+<p>当上下文切换完成后，CPU的占有权就发生了变化，比如从任务A变成了任务B。此时，任务A暂停运行，任务B开始运行。</p>
+<p>可以发现，区别于函数调用，<strong>上下文切换过程中发生了栈切换，由任务A的栈变成了任务B的栈。</strong></p>
+<h2 id="rt-thread中的上下文切换实现" tabindex="-1"><a class="header-anchor" href="#rt-thread中的上下文切换实现"><span>RT-Thread中的上下文切换实现</span></a></h2>
+<p>下面，让我们来看一下rt_hw_context_switch()的源码，以便对上下文切换有进一步的理解。</p>
+<p>rt_hw_context_switch()函数的源码如下：</p>
+<div class="language-arm line-numbers-mode" data-highlighter="shiki" data-ext="arm" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-arm"><span class="line"><span>; void rt_hw_context_switch(rt_uint32 from, rt_uint32 to);</span></span>
+<span class="line"><span>; r0 --> from, r1 --> to</span></span>
+<span class="line"><span>rt_hw_context_switch    PROC</span></span>
+<span class="line"><span>    EXPORT rt_hw_context_switch</span></span>
+<span class="line"><span>    ; 设置切换标志</span></span>
+<span class="line"><span>    LDR     r2, =rt_thread_switch_interrupt_flag</span></span>
+<span class="line"><span>    MOV     r3, #1</span></span>
+<span class="line"><span>    STR     r3, [r2]</span></span>
+<span class="line"><span>    ; 保存from任务的栈指针地址</span></span>
+<span class="line"><span>    LDR     r2, =rt_interrupt_from_thread</span></span>
+<span class="line"><span>    STR     r0, [r2]</span></span>
+<span class="line"><span>    ; 保存to任务的栈指针地址</span></span>
+<span class="line"><span>    LDR     r2, =rt_interrupt_to_thread</span></span>
+<span class="line"><span>    STR     r1, [r2]</span></span>
+<span class="line"><span>    ; 触发PendSV异常</span></span>
+<span class="line"><span>    LDR     r0, =NVIC_INT_CTRL</span></span>
+<span class="line"><span>    LDR     r1, =NVIC_PENDSVSET</span></span>
+<span class="line"><span>    STR     r1, [r0]</span></span>
+<span class="line"><span>    BX      LR</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>忽略掉前面的一部分汇编代码，在后半部分中，通过向NVIC的PENDSVSET位写1，触发PendSV异常。</p>
+<p>异常发生时，CPU会调用PendSV_Handler()异常处理函数，该函数的源码如下：</p>
+<div class="language-arm line-numbers-mode" data-highlighter="shiki" data-ext="arm" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-arm"><span class="line"><span>PendSV_Handler   PROC</span></span>
+<span class="line"><span>    EXPORT PendSV_Handler</span></span>
+<span class="line"><span>    ; 关中断，保护上下文切换过程</span></span>
+<span class="line"><span>    MRS     r2, PRIMASK</span></span>
+<span class="line"><span>    CPSID   I</span></span>
+<span class="line"><span>    ; 检查是否需要切换</span></span>
+<span class="line"><span>    LDR     r0, =rt_thread_switch_interrupt_flag</span></span>
+<span class="line"><span>    LDR     r1, [r0]</span></span>
+<span class="line"><span>    CBZ     r1, pendsv_exit</span></span>
+<span class="line"><span>    ; 清除切换标志</span></span>
+<span class="line"><span>    MOV     r1, #0x00</span></span>
+<span class="line"><span>    STR     r1, [r0]</span></span>
+<span class="line"><span>    ; 检查from任务是否为空（第一次切换时不需要保存）</span></span>
+<span class="line"><span>    LDR     r0, =rt_interrupt_from_thread</span></span>
+<span class="line"><span>    LDR     r1, [r0]</span></span>
+<span class="line"><span>    CBZ     r1, switch_to_thread</span></span>
+<span class="line"><span>    ; 保存from任务的R4-R11到它的栈</span></span>
+<span class="line"><span>    MRS     r1, psp</span></span>
+<span class="line"><span>    STMFD   r1!, {r4 - r11}</span></span>
+<span class="line"><span>    LDR     r0, [r0]</span></span>
+<span class="line"><span>    STR     r1, [r0]</span></span>
+<span class="line"><span>switch_to_thread</span></span>
+<span class="line"><span>    ; 从to任务的栈恢复R4-R11</span></span>
+<span class="line"><span>    LDR     r1, =rt_interrupt_to_thread</span></span>
+<span class="line"><span>    LDR     r1, [r1]</span></span>
+<span class="line"><span>    LDR     r1, [r1]</span></span>
+<span class="line"><span>    LDMFD   r1!, {r4 - r11}</span></span>
+<span class="line"><span>    MSR     psp, r1</span></span>
+<span class="line"><span>pendsv_exit</span></span>
+<span class="line"><span>    ; 恢复中断状态</span></span>
+<span class="line"><span>    MSR     PRIMASK, r2</span></span>
+<span class="line"><span>    ; 设置EXC_RETURN，确保返回到任务时使用PSP栈</span></span>
+<span class="line"><span>    ORR     lr, lr, #0x04</span></span>
+<span class="line"><span>    BX      lr</span></span>
+<span class="line"><span>    ENDP</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>这里，我们可以用一个流程图来简化对上述源码的理解：
+<img src="@source/notes/tech/rtos100/schedule/images/q46/PendSV上下文切换流程图.jpg" alt="PendSV上下文切换流程图"></p>
+<p>从代码和流程图可以看出，PendSV_Handler主要完成以下工作：</p>
+<ol>
+<li>进入PendSV异常时，硬件自动把当前任务的PSR、PC、LR、R12、R3-R0压入当前任务的栈。</li>
+<li>把当前任务的R4-R11保存到它的栈，更新任务控制块中的栈指针。</li>
+<li>从下一个任务的栈中恢复R4-R11，更新PSP指向下一个任务的栈。</li>
+<li>退出PendSV异常时，硬件自动从新任务的栈中弹出PSR、PC、LR、R12、R3-R0</li>
+<li>CPU跳转到新任务的PC地址开始运行</li>
+</ol>
+<p>可以看出：<strong>上下文切换的实际工作是在PendSV中完成的，rt_hw_context_switch()只是触发了PendSV异常，进而引发切换</strong>。</p>
+<p>这就是为什么rt_hw_context_switch()看起来是一个普通函数调用，但它能完成任务切换。</p>
+<h2 id="总结" tabindex="-1"><a class="header-anchor" href="#总结"><span>总结</span></a></h2>
+<p>综上所述，普通函数调用和上下文切换，看起来都是跳转到另一段代码去执行，但它们有着本质的区别。</p>
+<blockquote>
+<p><strong>普通函数调用始终在同一个任务的栈空间内进行,当前运行的任务不会变</strong>。
+<strong>上下文切换会改变当前运行的任务，且会发生栈空间的切换。</strong></p>
+</blockquote>
+<p>那么，上下文切换到底干了什么呢？简单来说，它就是<strong>把当前任务的&quot;工作现场&quot;完整地保存下来，再把另一个任务之前保存的&quot;工作现场&quot;恢复出来，然后让CPU去运行那个任务</strong>。</p>
+<hr>
+<blockquote>
+<p>如果你希望系统地学习RTOS底层原理，可以了解我的《RTOS开发与实战》课程。</p>
+<p>课程不是简单地讲解FreeRTOS API的使用，而是带你从零开始编写一个RTOS内核，逐步实现任务管理、任务调度、上下文切换、同步与通信等核心机制，并通过一个远程温湿度监控设备项目，将操作系统原理应用到实际嵌入式开发中。</p>
+<p>适合希望深入理解RTOS工作原理、提升嵌入式底层开发能力的同学。</p>
+<p><VPLink href="/blog/diyrtos/">课程详情</VPLink></p>
+</blockquote>
+</div></template>
+
+

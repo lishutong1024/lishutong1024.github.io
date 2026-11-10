@@ -1,0 +1,70 @@
+<template><div><div class="hint-container tip">
+<p class="hint-container-title">提示</p>
+<p>同学，你好，欢迎学习本课程！本课程是介绍了FATFS文件系统模块的基本使用，是一门相对较简单的课程。</p>
+<p>如果你对文件系统的实现比较感兴趣，也可以关注我的《<a href="https://wuptg.xetlk.com/s/VeHie" target="_blank" rel="noopener noreferrer">从0到1写FAT32文件系统</a>》课程。</p>
+<p>欢迎转载本文章，转载请注明链接来源，谢谢！</p>
+</div>
+<p>本小节介绍FATFS的读写定位接口，可参考C标准库中的fseek和rewind：</p>
+<ul>
+<li><a href="https://cplusplus.com/reference/cstdio/fseek/" target="_blank" rel="noopener noreferrer">https://cplusplus.com/reference/cstdio/fseek/</a></li>
+<li><a href="https://cplusplus.com/reference/cstdio/rewind/" target="_blank" rel="noopener noreferrer">https://cplusplus.com/reference/cstdio/rewind/</a></li>
+</ul>
+<h2 id="应用场合" tabindex="-1"><a class="header-anchor" href="#应用场合"><span>应用场合</span></a></h2>
+<p>在对文件读写时，并不总是从文件的最开始进行。在有些情况下，我们可能需要从文件的中间某个位置开始读写，因此，需要能够控制当前文件读写位置的函数。</p>
+<h2 id="接口介绍" tabindex="-1"><a class="header-anchor" href="#接口介绍"><span>接口介绍</span></a></h2>
+<h3 id="f-lseek-函数" tabindex="-1"><a class="header-anchor" href="#f-lseek-函数"><span>f_lseek()函数</span></a></h3>
+<p>f_lseek函数可用于移动文件的读/写指针，也可以用于扩展文件大小（预分配簇）。</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">FRESULT </span><span style="--shiki-light:#59873A;--shiki-dark:#80A665">f_lseek</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  FIL</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">*</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">    fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">  /* [IN] File object */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">  FSIZE_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> ofs</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">  /* [IN] Offset of file read/write pointer to be set */</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p><strong>参数：</strong></p>
+<ul>
+<li><code v-pre>fp</code>：指向已打开文件对象的指针。</li>
+<li><code v-pre>ofs</code>：设置要移动的文件读/写指针的字节偏移量，该偏移相对文件开头进行计算</li>
+</ul>
+<p><strong>返回值：</strong></p>
+<ul>
+<li><code v-pre>FR_OK</code>：操作成功。</li>
+<li><code v-pre>FR_DISK_ERR</code>：磁盘错误。</li>
+<li><code v-pre>FR_INT_ERR</code>：内部错误。</li>
+<li><code v-pre>FR_INVALID_OBJECT</code>：无效的对象。</li>
+<li><code v-pre>FR_TIMEOUT</code>：操作超时。</li>
+</ul>
+<p><strong>描述</strong></p>
+<p>f_lseek函数可移动文件的读/写指针，而不进行实际的读/写操作。所以，其相比通过读取来调整文件指针位置要快很多。</p>
+<h3 id="f-rewind-函数" tabindex="-1"><a class="header-anchor" href="#f-rewind-函数"><span>f_rewind()函数</span></a></h3>
+<p>另一用于辅助实现指针定位的函数是f_rewind()，它的功能是将读写指针重置到文件的最开始位置。</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">FRESULT </span><span style="--shiki-light:#59873A;--shiki-dark:#80A665">f_rewind</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  FIL</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">*</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">    fp</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">   /* [IN] File object */</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><h2 id="示例" tabindex="-1"><a class="header-anchor" href="#示例"><span>示例</span></a></h2>
+<p>以下是上述接口使用的示例：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">// 将读/写指针设置为5000</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">res </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> f_lseek</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 5000</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">// 将读/写指针设置到文件末尾以附加数据</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">res </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> f_lseek</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> f_size</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">));</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">// 向前移动读/写指针3000字节</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">res </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> f_lseek</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> f_tell</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> +</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 3000</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">// 向后移动读/写指针2000字节（注意处理溢出）</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">res </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> f_lseek</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> f_tell</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> -</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 2000</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">// 调整到文件开头</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">res </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> f_rewind</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">fp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><h1 id="注意事项" tabindex="-1"><a class="header-anchor" href="#注意事项"><span>注意事项</span></a></h1>
+<h2 id="定位到文件尾部" tabindex="-1"><a class="header-anchor" href="#定位到文件尾部"><span>定位到文件尾部</span></a></h2>
+<p>如果希望打开文件时，直接定位到文件尾部进行修改，可以修改f_open()中mode的参数，使用<code v-pre>FA_OPEN_APPEND</code>。当然也可以使用f_lseek()手动定位来完成。</p>
+<h2 id="超出文件大小" tabindex="-1"><a class="header-anchor" href="#超出文件大小"><span>超出文件大小</span></a></h2>
+<p>在写模式下，有可能出现超出文件大小的偏移量，即文件大小只有100字节，但是f_lseek()控制指针的位置要移动到200字节。显然，此时就超出了已有文件的大小。此时，指针位置的移动仍然能进行，在f_lseek()内部会主动扩充文件的大小，增加到200字节。至于扩充的数据是什么，则是未定义的。</p>
+<p><img src="/image/docs/notes/tech/fatfs/use/c2/seek/image.png" alt="alt 超出文件大小的问题"></p>
+<div class="hint-container tip">
+<p class="hint-container-title">提示</p>
+<p>🔥 想从零开始理解RTOS原理、手写可运行RTOS内核？
+👉 <a href="https://lishutong1024.cn/article/ceok23ne/" target="_blank" rel="noopener noreferrer">点击了解课程详情</a></p>
+</div>
+</div></template>
+
+

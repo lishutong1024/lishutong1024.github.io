@@ -1,0 +1,139 @@
+<template><div><blockquote>
+<p>为了更好地使用RTOS，我们需要深入理解RTOS工作原理，最好的方法是动手写一个RTOS。</p>
+<p>如果你希望写一个类似RT-Thread/FreeRTOS的系统，欢迎关注这门课程：<a href="https://zw8ls.xetlk.com/s/H2F1Y" target="_blank" rel="noopener noreferrer">【RTOS内核开发】从0手写嵌入式操作系统</a></p>
+</blockquote>
+<p>我们已经了解了任务是什么，在接下来将介绍RTOS是如何标识一个任务、如何将众多任务进行组织、按照何种策略选定任务运行。</p>
+<h2 id="rtos-如何标识每个任务-——使用任务控制块-tcb" tabindex="-1"><a class="header-anchor" href="#rtos-如何标识每个任务-——使用任务控制块-tcb"><span>RTOS 如何标识每个任务？——使用任务控制块（TCB）</span></a></h2>
+<p>为了唯一标识任务，RTOS内部为每一个任务都分配一个<strong>任务控制块（TCB, Task Control Block）</strong>，可以理解为一个“任务档案”。</p>
+<p><img src="/image/docs/notes/tech/rtthread/use/c3/RTOS是怎么管理任务的/image.png" alt="alt text"></p>
+<p>这份“档案”记录了这个任务的所有重要信息，例如前一节课时介绍的：</p>
+<ul>
+<li><strong>任务函数</strong>：任务的入口函数（逻辑体）</li>
+<li><strong>栈空间</strong>：保存任务运行时的临时数据和上下文</li>
+<li><strong>状态信息</strong>：就绪、运行、挂起、阻塞等</li>
+<li><strong>优先级</strong>：决定任务执行的先后顺序</li>
+</ul>
+<p>具体而言，不同的RTOS会使用不同的结构体来表示任务控制块，结构体中包含不同字段来存储任务的信息。例如，对于RT-Thread，任务控制块结构定义如下：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">struct</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> rt_thread</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* rt object */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    char</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">        name</span><span style="--shiki-light:#999999;--shiki-dark:#666666">[</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">RT_NAME_MAX</span><span style="--shiki-light:#999999;--shiki-dark:#666666">];</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                      /**&#x3C; the name of thread */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  type</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                                   /**&#x3C; type of object */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  flags</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                                  /**&#x3C; thread's flags */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_list_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">   list</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                                   /**&#x3C; the object list */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_list_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">   tlist</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                                  /**&#x3C; the thread list */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* stack point and entry */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">       *</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">sp</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                                     /**&#x3C; stack point */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">       *</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">entry</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                                  /**&#x3C; entry */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">       *</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">parameter</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                              /**&#x3C; parameter */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">       *</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">stack_addr</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                             /**&#x3C; stack address */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint32_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> stack_size</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                             /**&#x3C; stack size */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* error code */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_err_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">    error</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                                  /**&#x3C; error code */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  stat</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                                   /**&#x3C; thread status */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* priority */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  current_priority</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                       /**&#x3C; current priority */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  init_priority</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                          /**&#x3C; initialized priority */</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">if</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> RT_THREAD_PRIORITY_MAX</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> ></span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 32</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  number</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  high_mask</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">endif</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint32_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> number_mask</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">if</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375"> defined</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665">RT_USING_EVENT</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* thread event */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint32_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> event_set</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint8_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  event_info</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">#</span><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">endif</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_ubase_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  init_tick</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                              /**&#x3C; thread's initialized tick */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_ubase_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">  remaining_tick</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                         /**&#x3C; remaining tick */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    struct</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> rt_timer thread_timer</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                       /**&#x3C; built-in thread timer */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    void</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">*</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">cleanup</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">struct</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> rt_thread </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">*</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">tid</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">             /**&#x3C; cleanup function when thread exit */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">    rt_uint32_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> user_data</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">                              /**&#x3C; private user data beyond this thread */</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">};</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">typedef</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> struct</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> rt_thread </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">*</span><span style="--shiki-light:#998418;--shiki-dark:#B8A965">rt_thread_t</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><h2 id="rtos如何组织这些任务" tabindex="-1"><a class="header-anchor" href="#rtos如何组织这些任务"><span>RTOS如何组织这些任务</span></a></h2>
+<h3 id="不同类型的队列" tabindex="-1"><a class="header-anchor" href="#不同类型的队列"><span>不同类型的队列</span></a></h3>
+<p>RTOS会把系统中的所有任务控制块组织成不同的<strong>队列（通常用链表）</strong>。常见的任务列表有：</p>
+<ul>
+<li><strong>就绪队列</strong>：排队当前可以运行的任务</li>
+<li><strong>挂起/阻塞队列</strong>：排队等待事件或资源的任务</li>
+<li><strong>延时队列</strong>：排队等待超时的任务</li>
+</ul>
+<p><img src="/image/docs/notes/tech/rtthread/use/c3/RTOS是怎么管理任务的/image-1.png" alt="alt text"></p>
+<div class="hint-container info">
+<p class="hint-container-title">相关信息</p>
+<p>任务在执行过程中，会随着其运行状态的改变而从当前所处的队列脱离，并插入到另外的队列中。当任务终止运行时，才会不处于任何队列。</p>
+</div>
+<p>RTOS 就是通过这些队列，来跟踪每个任务的“当前状态”。</p>
+<p>RT-Thread内部的队列示意图如下：</p>
+<p><img src="/image/docs/notes/tech/rtthread/use/c3/RTOS是怎么管理任务的/image-2.png" alt="alt text"></p>
+<h3 id="为什么要使用队列" tabindex="-1"><a class="header-anchor" href="#为什么要使用队列"><span>为什么要使用队列</span></a></h3>
+<p>之所以要使用队列，主要原因有如下几点：</p>
+<h4 id="就绪队列-cpu资源有限-只能运行一个任务" tabindex="-1"><a class="header-anchor" href="#就绪队列-cpu资源有限-只能运行一个任务"><span>就绪队列：<strong>CPU资源有限，只能运行一个任务</strong></span></a></h4>
+<ul>
+<li>大多数嵌入式系统中，<strong>只有一个 CPU</strong>，同一时间只能运行一个任务。</li>
+<li>其他任务必须等待，因此需要一个<strong>就绪队列</strong>来存放那些“已经准备好，但还没轮到”的任务。</li>
+</ul>
+<h4 id="等待队列-任务可能等待资源或事件" tabindex="-1"><a class="header-anchor" href="#等待队列-任务可能等待资源或事件"><span>等待队列：<strong>任务可能等待资源或事件</strong></span></a></h4>
+<ul>
+<li>有些任务会因为<strong>等待按键、等待串口接收数据、等待定时器超时</strong>等原因而不能马上执行。</li>
+<li>这些任务就必须进入<strong>等待队列</strong>（也叫挂起队列、阻塞队列）。</li>
+<li>等待条件满足后（如数据来了），再唤醒它们，重新放入就绪队列。</li>
+</ul>
+<p>**延时队列：**<strong>任务等待时间到达</strong></p>
+<ul>
+<li>很多任务在运行过程中，需要延时（睡眠），或者在等待资源或事件的过程中需要加上超时机制，以避免长期死等</li>
+<li>RTOS会定时检查这些任务是否时间到达。为了方便管理这些任务，所有的任务加入到延时队列中。</li>
+</ul>
+<p>从述内容可以看出：<strong>通过这些队列，RTOS 就可以像一个智能的调度中心，管理每一个任务的状态与位置，确保</strong>实现如下功能：</p>
+<ul>
+<li>有资源时，任务能够马上安排执行；</li>
+<li>没资源时，任务被合理安排等待；条件满足后自动唤醒继续干活。</li>
+</ul>
+<h2 id="当有可用资源或者事件发生时-选取哪个任务去占用处理" tabindex="-1"><a class="header-anchor" href="#当有可用资源或者事件发生时-选取哪个任务去占用处理"><span>当有可用资源或者事件发生时，选取哪个任务去占用处理</span></a></h2>
+<p>无论是CPU，还是串口数据等，都可以看作是某种资源；而像外部中断等，则可以看作是某种事件。任务在执行过程中，既需要占用资源，也需要等待某些事件的发生。</p>
+<p>那么，如果多个任务同时希望占有某个资源，或者等待事件的发生时；RTOS应该采用何种策略来决定资源应该分配给谁，或者事件由谁去处理？</p>
+<p>常见的三种策略：</p>
+<h3 id="时间片轮转" tabindex="-1"><a class="header-anchor" href="#时间片轮转"><span>时间片轮转</span></a></h3>
+<p><strong>这种策略主要用在CPU运行时间的安排上，其主要特点有</strong>：</p>
+<ul>
+<li>优先级相同的任务之间，RTOS会<strong>分时执行</strong>，每个任务获得一个时间片。</li>
+<li>时间片用完就换下一个任务，循环调度。</li>
+</ul>
+<p>如果用生活中的例子来类比，可以理解为孩子轮流玩同一个玩具，每人玩10分钟。</p>
+<p>而对于CPU也是一样的道理，由于每个任务里面都有while(1)循环，会长期占用CPU。所以，RTOS为了避免某个任务长期占用CPU而导致其它任务无法运行，会强制让CPU轮流在每个任务上执行一小段时间，如10ms。</p>
+<p><img src="/image/docs/notes/tech/rtthread/use/c3/RTOS是怎么管理任务的/image-3.png" alt="alt text"></p>
+<h3 id="先来先服务-fcfs-fifo" tabindex="-1"><a class="header-anchor" href="#先来先服务-fcfs-fifo"><span>先来先服务（FCFS/FIFO）</span></a></h3>
+<p><strong>这种策略主要用在资源的占用和事件的等待上，其主要特点有</strong>：</p>
+<ul>
+<li>谁先请求资源，谁先获得资源或先被唤醒。</li>
+<li>和排队买票一样，<strong>先到先服务</strong>。</li>
+</ul>
+<p><strong>应用场景</strong>：</p>
+<ul>
+<li>对公平性要求高，但对实时性要求不高的系统。</li>
+</ul>
+<p><img src="/image/docs/notes/tech/rtthread/use/c3/RTOS是怎么管理任务的/image-4.png" alt="alt text"></p>
+<hr>
+<h3 id="优先级" tabindex="-1"><a class="header-anchor" href="#优先级"><span>优先级</span></a></h3>
+<p><strong>这种方式往往时间片轮转相结合，其主要特点如下</strong>：</p>
+<ul>
+<li>任务根据“紧急程度”设置不同的优先级。</li>
+<li>RTOS 总是选择<strong>优先级最高的就绪任务来执行</strong>。</li>
+<li>如果一个高优先级任务准备好了，会<strong>立即抢占</strong>正在运行的低优先级任务（前提是抢占式内核）。</li>
+</ul>
+<p><strong>类比现实生活中的场景</strong>：像急诊病人优先看病，不管你排了多久。</p>
+<p><img src="/image/docs/notes/tech/rtthread/use/c3/RTOS是怎么管理任务的/image-5.png" alt="alt text"></p>
+</div></template>
+
+

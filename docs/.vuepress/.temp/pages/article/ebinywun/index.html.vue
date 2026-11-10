@@ -1,0 +1,22 @@
+<template><div><p>以下推荐一些我读过的，感觉不错的书籍。</p>
+<h2 id="c语言" tabindex="-1"><a class="header-anchor" href="#c语言"><span>C语言</span></a></h2>
+<ul>
+<li><strong>《C Primer Plus》</strong> ：内容很全面，通俗易懂，还有相关配套练习题。针对C99作了相关的介绍。</li>
+<li><strong>《C程序设计语言》</strong> ：由C语言创始人丹尼斯·里奇（Dennis MacAlistair Ritchie）和布莱恩· Kernighan合著。</li>
+</ul>
+<h2 id="计算机网络" tabindex="-1"><a class="header-anchor" href="#计算机网络"><span>计算机网络</span></a></h2>
+<ul>
+<li><strong>《计算机网络：自顶向下方法》</strong>：采用自顶向下的方法讲授计算机网络的原理和协议，内容相对《TCP/IP详解》浅一些。</li>
+<li><strong>《TCP/IP详解 卷一：协议》</strong>：详细解析了TCP/IP协议的工作原理和实现细节，内容很全，适合对TCP/IP全面了解</li>
+<li><strong>《HTTP权威指南》</strong>：详细介绍了HTTP协议的工作原理、请报文格式等内容，内容全面，实用性强，通俗易懂。</li>
+</ul>
+<h2 id="操作系统" tabindex="-1"><a class="header-anchor" href="#操作系统"><span>操作系统</span></a></h2>
+<ul>
+<li><strong>《操作系统概念》</strong> ：深入讲解了操作系统相关的概念和原理，适合理论学习。不过内容较抽像一些。</li>
+<li><strong>《UNIX 操作系统设计》</strong> ：介绍了Unix操作系统相关的设计原理，适合有一定基础的同学阅读</li>
+<li><strong>《30天自制操作系统》</strong>：动手实践类的书籍，代码写得比较乱，但是最终功能较丰富。</li>
+</ul>
+<p>更多推荐，陆续补充中...</p>
+</div></template>
+
+

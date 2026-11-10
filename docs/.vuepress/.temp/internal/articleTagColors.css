@@ -1,0 +1,30 @@
+.vp-tag-snqc {
+  --vp-tag-color: #d5393e;
+  --vp-tag-hover-color: #b8272c;
+  --vp-tag-bg: rgba(244, 63, 94, 0.14);
+}
+.vp-tag-eq3i {
+  --vp-tag-color: #3a5ccc;
+  --vp-tag-hover-color: #3451b2;
+  --vp-tag-bg: rgba(100, 108, 255, 0.14);
+}
+.vp-tag-38qx {
+  --vp-tag-color: #fab10f;
+  --vp-tag-hover-color: #f39c12;
+  --vp-tag-bg: rgba(255, 213, 0, 0.14);
+}
+.vp-tag-a77m {
+  --vp-tag-color: #55aaee;
+  --vp-tag-hover-color: #2391e9;
+  --vp-tag-bg: rgba(21, 123, 206, 0.1333);
+}
+.vp-tag-lcb6 {
+  --vp-tag-color: #cc3366;
+  --vp-tag-hover-color: #d55680;
+  --vp-tag-bg: rgba(217, 102, 140, 0.2);
+}
+.vp-tag-6bsg {
+  --vp-tag-color: #cc9933;
+  --vp-tag-hover-color: #be7f3f;
+  --vp-tag-bg: rgba(161, 107, 54, 0.2);
+}

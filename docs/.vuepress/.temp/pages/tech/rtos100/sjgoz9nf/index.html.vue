@@ -1,0 +1,69 @@
+<template><div><p>有位同学在学完我的《从0手写嵌入式操作系统》课程中的信号量实现部分后，同时参考了FreeRTOS的实现源码，他发现：</p>
+<blockquote>
+<p>FreeRTOS里除了计数信号量，还有专门的二值信号量。</p>
+</blockquote>
+<p>于是，这位同学提出疑问：二值信号量到底是什么？为什么需要单独搞一个二值信号量？</p>
+<p>在这篇文章中，我将从问题出发，介绍为什么需要二值信号量、以及什么是二值信号量。</p>
+<h2 id="问题需求" tabindex="-1"><a class="header-anchor" href="#问题需求"><span>问题需求</span></a></h2>
+<p>假设在串口中断uart_isr中，每收满一帧数据，就释放信号量，通知处理任务parse_task解析数据帧。其代码如下：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 中断里：每收满一帧就release一次 */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> uart_isr</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665">frame_ready</span><span style="--shiki-light:#999999;--shiki-dark:#666666">())</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_sem_release</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">rx_sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">  /* 连续收3帧，计数累加到3 */</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 任务里：take一次处理一帧 */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> parse_task</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">    while</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">1</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> {</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        rt_sem_take</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">rx_sem</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_WAITING_FOREVER</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">        parse_frame</span><span style="--shiki-light:#999999;--shiki-dark:#666666">();</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">  /* 计数3→2→1，被唤醒3次 */</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">    }</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>一旦处理任务比较慢，有可能还没来得及处理第一帧，中断又连续收满了第二帧、第三帧。此时，uart_isr将连续释放两次信号量，使得信号量的计数最终变成3。此时，parse_task任务将连续执行三次数据解析函数parse_frame()。</p>
+<blockquote>
+<p>如果程序中只为数据帧的接收设置了一个帧的缓冲区，这将导致只能存放这三帧数据中某一帧。
+而parse_task任务以为有三帧要处理，最终实际上拿到的可能还是旧数据，只能丢弃或报错。</p>
+</blockquote>
+<p>分析上述现象，可以找出问题的根源在于：<strong>计数信号量会忠实地累计释放的次数，但在某些场景，我们只关心&quot;有没有事件发生&quot;，不需要累计&quot;发生了几次&quot;。</strong> <strong>这种多余的累计反而会导致任务被虚假唤醒。</strong></p>
+<p>那么，有没有一种信号量，不会进行计数的多余累加？这就是二值信号量。</p>
+<h2 id="什么是二值信号量" tabindex="-1"><a class="header-anchor" href="#什么是二值信号量"><span>什么是二值信号量</span></a></h2>
+<p>二值信号量是一种特殊的信号量，它的计数值只能在<strong>0和1</strong>之间变化。</p>
+<blockquote>
+<p>它的含义非常简单：</p>
+<ul>
+<li>计数为0：当前没有待处理的事件，任务必须阻塞等待。</li>
+<li>计数为1：当前有一个待处理的事件，任务可以直接拿走并继续运行。</li>
+</ul>
+</blockquote>
+<p>可以看到，与计数信号量最大的区别在于：二值信号量的计数最大只能是1，即使连续释放多次，计数也只会保持1。</p>
+<p>这意味着二值信号量<strong>记不住事件发生了多少次，它只表达&quot;现在有没有一个待处理的事件&quot;</strong>。这恰恰是事件同步场景最需要的特性。</p>
+<h2 id="二值信号量的api示例" tabindex="-1"><a class="header-anchor" href="#二值信号量的api示例"><span>二值信号量的API示例</span></a></h2>
+<p>在FreeRTOS里，提供了面向二值信号量的API，主要接口有：</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 创建二值信号量，创建后初始值为0 */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">SemaphoreHandle_t</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> xSemaphoreCreateBinary</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 获取信号量，第二个参数是超时时间 */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">BaseType_t</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> xSemaphoreTake</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#998418;--shiki-dark:#B8A965">SemaphoreHandle_t</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> xSemaphore</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#998418;--shiki-dark:#B8A965"> TickType_t</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> xTicksToWait</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 释放信号量（任务上下文使用） */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">BaseType_t</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> xSemaphoreGive</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#998418;--shiki-dark:#B8A965">SemaphoreHandle_t</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> xSemaphore</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 释放信号量（中断上下文必须用这个版本） */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">BaseType_t</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> xSemaphoreGiveFromISR</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#998418;--shiki-dark:#B8A965">SemaphoreHandle_t</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A"> xSemaphore</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">                                   BaseType_t</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> *</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">pxHigherPriorityTaskWoken</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><p>需要注意的是，并不是所有的RTOS都提供独立的二值信号量API。例如，RT-Thread仅提供了通用的信号量创建接口rt_sem_create()，没有单独的二值信号量API。</p>
+<h2 id="总结" tabindex="-1"><a class="header-anchor" href="#总结"><span>总结</span></a></h2>
+<p>综上所述，<strong>二值信号量是一种计数值只能在0和1之间变化的特殊信号量，专门用于事件同步场景。</strong></p>
+<p>和普通计数信号量相比，二值信号量不会累计事件次数，不会导致任务被虚假唤醒，非常适合中断与任务之间、任务与任务之间的单次事件通知。</p>
+<hr>
+<blockquote>
+<p>如果你希望系统地学习RTOS底层原理，可以了解我的《RTOS开发与实战》课程。</p>
+<p>课程不是简单地讲解FreeRTOS API的使用，而是带你从零开始编写一个RTOS内核，逐步实现任务管理、任务调度、上下文切换、同步与通信等核心机制，并通过一个远程温湿度监控设备项目，将操作系统原理应用到实际嵌入式开发中。</p>
+<p>适合希望深入理解RTOS工作原理、提升嵌入式底层开发能力的同学。</p>
+<p><VPLink href="/blog/diyrtos/">课程详情</VPLink></p>
+</blockquote>
+</div></template>
+
+

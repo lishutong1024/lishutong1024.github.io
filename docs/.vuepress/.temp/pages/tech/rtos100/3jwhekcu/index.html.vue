@@ -1,0 +1,73 @@
+<template><div><p>有同学在做项目的时候问我：RT-Thread里有个rt_timer_create()可以创建软件定时器，但是MCU本身也有硬件定时器外设，那我到底该用哪个，软件定时器和硬件定时器到底有什么区别。</p>
+<div class="hint-container note">
+<p class="hint-container-title">注</p>
+<p>他的困惑很有代表性：</p>
+<blockquote>
+<p>一个是OS提供的API，一个是芯片自带的外设，看起来都能定时，可真到选型的时候就犯难了。</p>
+</blockquote>
+<p>这两种定时器，本质上根本不是一回事。</p>
+<p>这篇文章我就来把这两种定时器讲明白，以后再遇到就知道该挑哪个。</p>
+</div>
+<h2 id="硬件定时器-芯片里真实存在的外设" tabindex="-1"><a class="header-anchor" href="#硬件定时器-芯片里真实存在的外设"><span>硬件定时器：芯片里真实存在的外设</span></a></h2>
+<p>先说硬件定时器。每颗MCU里面，都有若干个硬件定时器外设。它们是真实的硬件电路，有自己的计数器寄存器、自动重装载寄存器、比较寄存器。</p>
+<p>你配置好定时器的分频系数和重装载值，它就自己开始计数。数到溢出了，硬件自动触发中断。整个过程不需要CPU干预，CPU该干嘛干嘛，时间到了硬件会主动通知你。
+<img src="@source/notes/tech/rtos100/timer/images/q54/硬件定时器工作流程图.jpg" alt="硬件定时器工作流程图"></p>
+<p>硬件定时器的优点是精度高、不占CPU、到时间一定进中断。你可以用它做微秒级的延时、做PWM输出、做输入捕获。这些对精度要求很高的事情，软件定时器是做不到的。</p>
+<h2 id="软件定时器-rtos用软件模拟出来的" tabindex="-1"><a class="header-anchor" href="#软件定时器-rtos用软件模拟出来的"><span>软件定时器：RTOS用软件模拟出来的</span></a></h2>
+<p>软件定时器就不一样了。它不是真实的硬件，而是RTOS内核用软件模拟出来的功能。</p>
+<p>RTOS内部维护一个定时器列表。你调用rt_timer_create()创建一个软件定时器的时候，内核会给它分配一个控制块，记录到期时间，然后把这个定时器挂到列表上。</p>
+<p>每次系统节拍中断触发的时候，内核会遍历这个定时器列表，检查有没有到期的定时器。如果有，就把它标记为超时。
+<img src="@source/notes/tech/rtos100/timer/images/q54/软件定时器到期检查流程图.jpg" alt="软件定时器到期检查流程图"></p>
+<p>注意这里的关键点，回调函数不是在中断里执行的，而是在一个专门的定时器任务里执行的。</p>
+<p>这意味着什么呢？意味着即使定时器到时间了，回调函数也不一定马上执行。如果此时有更高优先级的任务在运行，定时器任务就得等着。只有等高优先级任务阻塞或者退出了，定时器任务才有机会跑起来，去执行回调函数。
+<img src="@source/notes/tech/rtos100/timer/images/q54/软件定时器优先级等待时序图.jpg" alt="软件定时器优先级等待时序图"></p>
+<h2 id="两者的核心区别" tabindex="-1"><a class="header-anchor" href="#两者的核心区别"><span>两者的核心区别</span></a></h2>
+<p>我来把两者的差别总结一下：
+<img src="@source/notes/tech/rtos100/timer/images/q54/硬件定时器与软件定时器对比图.jpg" alt="硬件定时器与软件定时器对比图"></p>
+<h2 id="使用场景怎么选" tabindex="-1"><a class="header-anchor" href="#使用场景怎么选"><span>使用场景怎么选</span></a></h2>
+<p>那实际开发的时候，到底该用哪个呢？我的建议是这样的。</p>
+<ol>
+<li>对精度要求高的：比如做PWM、做精确延时、做输入捕获，用硬件定时器。</li>
+<li>对精度要求不高的：比如每隔1秒采集一次数据、每隔500ms刷新一下LED，用软件定时器就够了。</li>
+<li>需要大量定时器的：比如系统里有十几个定时任务，硬件定时器数量不够，就用软件定时器。</li>
+<li>回调函数里要做复杂处理的：用软件定时器，因为回调在任务上下文，不会占用中断时间。</li>
+</ol>
+<p>还有一点要特别注意，软件定时器的回调函数里，不能调用会阻塞的API。因为回调函数是在定时器任务的上下文中执行的，如果你在回调里调用rt_thread_mdelay()或者rt_sem_take()永久等待，那整个定时器任务就被你卡住了，后面其他软件定时器的回调都没法执行。</p>
+<div class="language-c line-numbers-mode" data-highlighter="shiki" data-ext="c" style="--shiki-light:#393a34;--shiki-dark:#dbd7caee;--shiki-light-bg:#ffffff;--shiki-dark-bg:#121212"><pre class="shiki shiki-themes vitesse-light vitesse-dark vp-code" v-pre=""><code class="language-c"><span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 软件定时器的回调函数示例 */</span></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> timer_callback</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">void</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> *</span><span style="--shiki-light:#B07D48;--shiki-dark:#BD976A">parameter</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* 这里只能做简短的处理 */</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* 不能调用rt_thread_mdelay() */</span></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* 不能调用rt_sem_take()永久等待 */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">    static</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676"> int</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> count </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91"> 0</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">    count</span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">++</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    rt_kprintf</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">定时器触发了，第</span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">%d</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">次</span><span style="--shiki-light:#A65E2B;--shiki-dark:#C99076">\n</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> count</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">/* 创建并启动软件定时器 */</span></span>
+<span class="line"><span style="--shiki-light:#998418;--shiki-dark:#B8A965">rt_timer_t</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> timer</span><span style="--shiki-light:#999999;--shiki-dark:#666666">;</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">timer </span><span style="--shiki-light:#999999;--shiki-dark:#666666">=</span><span style="--shiki-light:#59873A;--shiki-dark:#80A665"> rt_timer_create</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#B56959;--shiki-dark:#C98A7D">timer1</span><span style="--shiki-light:#B5695977;--shiki-dark:#C98A7D77">"</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">                        timer_callback</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">                        RT_NULL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span></span>
+<span class="line"><span style="--shiki-light:#2F798A;--shiki-dark:#4C9A91">                        1000</span><span style="--shiki-light:#999999;--shiki-dark:#666666">,</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">    /* 1000个tick，即1秒 */</span></span>
+<span class="line"><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">                        RT_TIMER_FLAG_PERIODIC</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span><span style="--shiki-light:#A0ADA0;--shiki-dark:#758575DD">  /* 周期性定时器 */</span></span>
+<span class="line"></span>
+<span class="line"><span style="--shiki-light:#1E754F;--shiki-dark:#4D9375">if</span><span style="--shiki-light:#999999;--shiki-dark:#666666"> (</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">timer </span><span style="--shiki-light:#AB5959;--shiki-dark:#CB7676">!=</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE"> RT_NULL</span><span style="--shiki-light:#999999;--shiki-dark:#666666">)</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">{</span></span>
+<span class="line"><span style="--shiki-light:#59873A;--shiki-dark:#80A665">    rt_timer_start</span><span style="--shiki-light:#999999;--shiki-dark:#666666">(</span><span style="--shiki-light:#393A34;--shiki-dark:#DBD7CAEE">timer</span><span style="--shiki-light:#999999;--shiki-dark:#666666">);</span></span>
+<span class="line"><span style="--shiki-light:#999999;--shiki-dark:#666666">}</span></span></code></pre>
+<div class="line-numbers" aria-hidden="true" style="counter-reset:line-number 0"><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div><div class="line-number"></div></div></div><h2 id="综上所述" tabindex="-1"><a class="header-anchor" href="#综上所述"><span>综上所述</span></a></h2>
+<p>硬件定时器和软件定时器各有各的用途。硬件定时器精度高、响应快，但数量有限；软件定时器数量多、使用灵活，但精度受限于系统节拍，而且回调函数有执行延迟。搞清楚它们的区别，才能在合适的场景选对合适的工具。</p>
+<h2 id="写在最后" tabindex="-1"><a class="header-anchor" href="#写在最后"><span>写在最后</span></a></h2>
+<p>如果只停留在会调用rt_timer_create()，是想不明白软件定时器为什么不能在中断里执行回调、为什么要专门搞一个定时器任务的。亲手实现过定时器列表的管理和回调执行流程，你就知道为什么回调不能阻塞，也理解RTOS为什么要这样设计了。</p>
+<hr>
+<blockquote>
+<p>如果你希望系统地学习RTOS底层原理，可以了解我的《RTOS开发与实战》课程。</p>
+<p>课程不是简单地讲解FreeRTOS API的使用，而是带你从零开始编写一个RTOS内核，逐步实现任务管理、任务调度、上下文切换、同步与通信等核心机制，并通过一个远程温湿度监控设备项目，将操作系统原理应用到实际嵌入式开发中。</p>
+<p>适合希望深入理解RTOS工作原理、提升嵌入式底层开发能力的同学。</p>
+<p><VPLink href="/blog/diyrtos/">课程详情</VPLink></p>
+</blockquote>
+</div></template>
+
+
